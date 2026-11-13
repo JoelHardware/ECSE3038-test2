@@ -1,0 +1,5 @@
+.env
+venv/
+.pio/
+board/include/secrets.h
+__pycache__/
