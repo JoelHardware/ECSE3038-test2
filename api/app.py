@@ -8,6 +8,7 @@ from pymongo.errors import DuplicateKeyError
 from dotenv import load_dotenv
 import os
 import secrets
+from fastapi import Query
 
 # Load environment variables
 load_dotenv()
@@ -142,3 +143,24 @@ def create_reading(
         "humidity": reading.humidity,
         "timestamp": new_reading["timestamp"]
     }
+
+# A3 - GET readings endpoint
+
+@app.get("/readings")
+def get_readings(
+    mac: str | None = None,
+    limit: int = Query(default=10, ge=1, le=100)
+):
+    query = {}
+
+    if mac is not None:
+        query["mac"] = mac
+
+    readings = list(
+        db["readings"]
+        .find(query, {"_id": 0})
+        .sort("timestamp", -1)
+        .limit(limit)
+    )
+
+    return readings
