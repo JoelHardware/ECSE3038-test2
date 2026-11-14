@@ -10,6 +10,12 @@ import os
 import secrets
 from fastapi import Query
 
+from fastapi import FastAPI, HTTPException, Header, Query, Response
+from pydantic import BaseModel, Field
+from typing import Literal
+import paho.mqtt.publish as publish
+import json
+
 # Load environment variables
 load_dotenv()
 
@@ -164,3 +170,86 @@ def get_readings(
     )
 
     return readings
+
+
+# A4 - Model for fan settings
+class FanSettings(BaseModel):
+    mode: Literal["auto", "on", "off"]
+    max_humidity: float = Field(ge=0, le=100)
+
+
+# A4 - Create or update fan settings
+@app.put("/fans/{mac}/settings")
+def update_fan_settings(
+    mac: str,
+    settings: FanSettings,
+    response: Response
+):
+
+    # Find the registered fan
+    fan = fans_collection.find_one({"mac": mac})
+
+    if fan is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Fan not found"
+        )
+
+    # Check whether settings already exist
+    settings_exist = "settings" in fan
+
+    # Create settings object
+    new_settings = {
+        "mode": settings.mode,
+        "max_humidity": settings.max_humidity
+    }
+
+    # Save settings in MongoDB
+    fans_collection.update_one(
+        {"mac": mac},
+        {"$set": {"settings": new_settings}}
+    )
+
+    # Get MQTT name from .env
+    mqtt_name = os.getenv("MQTT_NAME")
+
+    if not mqtt_name:
+        raise HTTPException(
+            status_code=500,
+            detail="MQTT_NAME is not configured"
+        )
+
+    # Build MQTT topic
+    topic = f"ecse3038/{mqtt_name}/fan/settings"
+
+    # Convert settings to JSON
+    payload = json.dumps(new_settings)
+
+    # Publish retained settings
+    try:
+        publish.single(
+            topic=topic,
+            payload=payload,
+            hostname="135.232.203.144",
+            port=1883,
+            qos=1,
+            retain=True
+        )
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=503,
+            detail=f"MQTT publish failed: {error}"
+        )
+
+    # Set response status
+    if settings_exist:
+        response.status_code = 200
+    else:
+        response.status_code = 201
+
+    return {
+        "mac": mac,
+        "settings": new_settings,
+        "mqtt_topic": topic
+    }
