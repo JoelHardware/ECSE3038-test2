@@ -253,3 +253,51 @@ def update_fan_settings(
         "settings": new_settings,
         "mqtt_topic": topic
     }
+
+
+# A5 - Delete a registered fan
+@app.delete("/fans/{mac}", status_code=204)
+def delete_fan(
+    mac: str,
+    x_api_key: str | None = Header(default=None)
+):
+
+    # Check whether the requested fan exists
+    fan = fans_collection.find_one({"mac": mac})
+
+    if fan is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Fan not found"
+        )
+
+    # Check whether an API key was provided
+    if not x_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key"
+        )
+
+    # Check whether the API key is recognized
+    key_owner = fans_collection.find_one({
+        "api_key": x_api_key
+    })
+
+    if key_owner is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key"
+        )
+
+    # Verify the key belongs to this fan
+    if key_owner["mac"] != mac:
+        raise HTTPException(
+            status_code=403,
+            detail="API key belongs to another fan"
+        )
+
+    # Delete the fan from MongoDB
+    fans_collection.delete_one({"mac": mac})
+
+    # Return 204 No Content
+    return None
