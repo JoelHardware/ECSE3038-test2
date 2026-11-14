@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include "secrets.h"
 #include <PubSubClient.h>
+#include <math.h>
 
 // WiFi configuration
 const char* WIFI_SSID = "Wokwi-GUEST";
@@ -53,6 +54,99 @@ PubSubClient mqttClient(mqttWiFiClient);
 
 String statusTopic;
 
+// MQTT settings topic
+String settingsTopic;
+
+// Current fan settings
+String fanMode = "off";
+float maxHumidity = 100.0;
+
+// Tracks whether valid settings have been received
+bool settingsReceived = false;
+
+
+// B3 - Receive and validate MQTT settings
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+
+  Serial.print("Received MQTT topic: ");
+  Serial.println(topic);
+
+  // Only process fan settings messages
+  if (String(topic) != settingsTopic) {
+    Serial.println("Ignored: Different MQTT topic");
+    return;
+  }
+
+  Serial.println("MQTT settings received!");
+
+  // Parse incoming JSON directly from payload
+  JsonDocument doc;
+
+  DeserializationError error = deserializeJson(
+    doc,
+    payload,
+    length
+  );
+
+  // Reject malformed JSON
+  if (error) {
+    Serial.println("Rejected: Invalid JSON");
+    return;
+  }
+
+  // Reject missing fields
+  if (doc["mode"].isNull() ||
+      doc["max_humidity"].isNull()) {
+
+    Serial.println("Rejected: Missing fields");
+    return;
+  }
+
+  // Verify field types
+  if (!doc["mode"].is<const char*>() ||
+      !doc["max_humidity"].is<JsonFloat>() &&
+      !doc["max_humidity"].is<JsonInteger>()) {
+
+    Serial.println("Rejected: Invalid field types");
+    return;
+  }
+
+  // Extract proposed settings
+  String newMode = doc["mode"].as<String>();
+  float newMaxHumidity =
+      doc["max_humidity"].as<float>();
+
+  // Reject invalid modes
+  if (newMode != "auto" &&
+      newMode != "on" &&
+      newMode != "off") {
+
+    Serial.println("Rejected: Invalid mode");
+    return;
+  }
+
+  // Reject invalid humidity thresholds
+  if (!isfinite(newMaxHumidity) ||
+      newMaxHumidity < 0 ||
+      newMaxHumidity > 100) {
+
+    Serial.println("Rejected: Invalid humidity limit");
+    return;
+  }
+
+  // All checks passed: update settings together
+  fanMode = newMode;
+  maxHumidity = newMaxHumidity;
+  settingsReceived = true;
+
+  Serial.println("Settings accepted!");
+  Serial.print("Mode: ");
+  Serial.println(fanMode);
+
+  Serial.print("Max humidity: ");
+  Serial.println(maxHumidity);
+}
+
 
 void connectMQTT() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -79,12 +173,21 @@ void connectMQTT() {
     if (connected) {
       Serial.println("Connected!");
 
-      // Publish retained online status
+      // Publish online status
       mqttClient.publish(
         statusTopic.c_str(),
         "online",
         true
       );
+
+      // Subscribe to fan settings
+      if (mqttClient.subscribe(settingsTopic.c_str(), 1)) {
+        Serial.println("Subscribed to fan settings!");
+        Serial.print("Subscribed topic: ");
+        Serial.println(settingsTopic);
+      } else {
+        Serial.println("Failed to subscribe to settings");
+      }
 
     } else {
       Serial.print("Failed, MQTT state: ");
@@ -143,9 +246,15 @@ void setup() {
   statusTopic = String("ecse3038/") +
                 MQTT_NAME + "/status";
 
+  // Construct fan settings topic
+  settingsTopic = String("ecse3038/") +
+                MQTT_NAME + "/fan/settings";
+
   // Configure MQTT broker
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
   mqttClient.setKeepAlive(10);
+  mqttClient.setBufferSize(512);
+  mqttClient.setCallback(mqttCallback);
 
   // Connect and publish online status
   connectMQTT();
