@@ -22,6 +22,9 @@ const char* API_URL =
 
 DHT dht(DHT_PIN, DHT_TYPE);
 
+// Fan LED
+#define FAN_LED_PIN 2
+
 // Timing
 unsigned long lastReading = 0;
 const unsigned long INTERVAL = 10000;
@@ -47,7 +50,7 @@ const char* MQTT_SERVER = "135.232.203.144";
 const int MQTT_PORT = 1883;
 
 // Using MQTT name from Tutorial 9
-const char* MQTT_NAME = "tobia7140";
+const char* MQTT_NAME = "tobias7140";
 
 WiFiClient mqttWiFiClient;
 PubSubClient mqttClient(mqttWiFiClient);
@@ -63,6 +66,49 @@ float maxHumidity = 100.0;
 
 // Tracks whether valid settings have been received
 bool settingsReceived = false;
+
+// Current humidity and fan state
+float currentHumidity = NAN;
+bool fanState = false;
+
+
+// B4 - Control the fan LED
+void updateFan() {
+
+  bool newFanState = false;
+
+  // Keep fan off until settings arrive
+  if (settingsReceived) {
+
+    if (fanMode == "on") {
+      newFanState = true;
+    }
+
+    else if (fanMode == "off") {
+      newFanState = false;
+    }
+
+    else if (fanMode == "auto") {
+      if (!isnan(currentHumidity)) {
+        newFanState = currentHumidity > maxHumidity;
+      }
+    }
+  }
+
+  // Update fan only when its state changes
+  if (newFanState != fanState) {
+
+    fanState = newFanState;
+
+    digitalWrite(
+      FAN_LED_PIN,
+      fanState ? HIGH : LOW
+    );
+
+    Serial.print("Fan state: ");
+    Serial.println(fanState ? "ON" : "OFF");
+  }
+}
 
 
 // B3 - Receive and validate MQTT settings
@@ -104,8 +150,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   // Verify field types
   if (!doc["mode"].is<const char*>() ||
-      !doc["max_humidity"].is<JsonFloat>() &&
-      !doc["max_humidity"].is<JsonInteger>()) {
+      (!doc["max_humidity"].is<JsonFloat>() &&
+       !doc["max_humidity"].is<JsonInteger>())) {
 
     Serial.println("Rejected: Invalid field types");
     return;
@@ -145,6 +191,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   Serial.print("Max humidity: ");
   Serial.println(maxHumidity);
+
+  // React immediately to new settings
+  updateFan();
 }
 
 
@@ -234,6 +283,10 @@ void sendReading(float humidity) {
 void setup() {
   Serial.begin(115200);
 
+  // Configure fan LED
+  pinMode(FAN_LED_PIN, OUTPUT);
+  digitalWrite(FAN_LED_PIN, LOW);
+
   dht.begin();
   connectWiFi();
 
@@ -290,6 +343,12 @@ void loop() {
 
     Serial.print("Humidity: ");
     Serial.println(humidity);
+
+    // Store latest humidity for fan control
+    currentHumidity = humidity;
+
+    // Update fan based on humidity
+    updateFan();
 
     sendReading(humidity);
   }
