@@ -60,6 +60,9 @@ String statusTopic;
 // MQTT settings topic
 String settingsTopic;
 
+// B5 - Fan state topic
+String fanStateTopic;
+
 // Current fan settings
 String fanMode = "off";
 float maxHumidity = 100.0;
@@ -73,6 +76,7 @@ bool fanState = false;
 
 
 // B4 - Control the fan LED
+
 void updateFan() {
 
   bool newFanState = false;
@@ -107,8 +111,25 @@ void updateFan() {
 
     Serial.print("Fan state: ");
     Serial.println(fanState ? "ON" : "OFF");
+
+    // B5 - Publish retained fan state
+    if (mqttClient.connected()) {
+
+      bool published = mqttClient.publish(
+        fanStateTopic.c_str(),
+        fanState ? "on" : "off",
+        true
+      );
+
+      if (published) {
+        Serial.println("Fan state published to MQTT!");
+      } else {
+        Serial.println("Failed to publish fan state");
+      }
+    }
   }
 }
+
 
 
 // B3 - Receive and validate MQTT settings
@@ -302,6 +323,10 @@ void setup() {
   // Construct fan settings topic
   settingsTopic = String("ecse3038/") +
                 MQTT_NAME + "/fan/settings";
+
+  // B5 - Construct fan state topic
+  fanStateTopic = String("ecse3038/") +
+                MQTT_NAME + "/fan/state";
 
   // Configure MQTT broker
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
